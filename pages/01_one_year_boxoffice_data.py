@@ -37,8 +37,8 @@ def fetch_one_year_boxoffice(api_key):
     # '어제' 날짜를 구합니다 (오늘 데이터는 집계 전이므로 어제부터 시작)
     yesterday = now_kst - timedelta(days=1)
     
-    # 어제부터 과거 365일간의 날짜 목록(YYYYMMDD 형태)을 생성합니다.
-    date_list = [(yesterday - timedelta(days=i)).strftime('%Y%m%d') for i in range(365)]
+    # 어제부터 과거 365일간의 날짜 객체 목록을 만듭니다.
+    dates = [yesterday - timedelta(days=i) for i in range(365)]
     
     all_data = []      # 모든 일자별 영화 데이터를 담을 리스트
     failed_dates = []  # 데이터를 불러오지 못한 날짜를 담을 리스트
@@ -46,14 +46,19 @@ def fetch_one_year_boxoffice(api_key):
     # 화면에 수집 진행 상황을 보여주는 바(Bar)와 텍스트를 준비합니다.
     progress_bar = st.progress(0)
     status_text = st.empty()
-    total_days = len(date_list)
+    total_days = len(dates)
     
     base_url = "https://www.kobis.or.kr/kobisopenapi/webservice/rest/boxoffice/searchDailyBoxOfficeList.json"
     
     # 365일 데이터를 하루씩 반복해서 가져옵니다.
-    for index, target_dt in enumerate(date_list):
+    for index, date_obj in enumerate(dates):
+        # API 요청용 날짜 형식: YYYYMMDD (예: 20260908)
+        target_dt = date_obj.strftime('%Y%m%d')
+        # 화면 표기용 날짜 형식: YYYY-MM-DD (예: 2026-09-08)
+        formatted_date = date_obj.strftime('%Y-%m-%d')
+        
         # 진행 상황 안내 문구 업데이트
-        status_text.text(f"⏳ 데이터 수집 중... ({index + 1}/{total_days} 일) - 기준일자: {target_dt}")
+        status_text.text(f"⏳ 데이터 수집 중... ({index + 1}/{total_days} 일) - 기준일자: {formatted_date}")
         progress_bar.progress((index + 1) / total_days)
         
         try:
@@ -66,14 +71,14 @@ def fetch_one_year_boxoffice(api_key):
             
             # 네트워크 요청 실패 시 해당 날짜 건너뛰기
             if response.status_code != 200:
-                failed_dates.append(target_dt)
+                failed_dates.append(formatted_date)
                 continue
             
             data = response.json()
             
             # API 내부 에러(faultInfo)가 포함되어 있는 경우 건너뛰기
             if 'faultInfo' in data:
-                failed_dates.append(target_dt)
+                failed_dates.append(formatted_date)
                 continue
                 
             box_office_result = data.get('boxOfficeResult', {})
@@ -81,17 +86,18 @@ def fetch_one_year_boxoffice(api_key):
             
             # 영화 목록이 비어있는 경우 건너뛰기
             if not daily_list:
-                failed_dates.append(target_dt)
+                failed_dates.append(formatted_date)
                 continue
             
-            # 추출한 각 영화 정보에 '조회 날짜' 정보를 추가하여 저장
+            # 맨 앞 컬럼에 구분하기 쉬운 'YYYY-MM-DD' 형식 날짜를 넣어줍니다.
             for movie in daily_list:
-                movie['targetDt'] = target_dt
-                all_data.append(movie)
+                movie_with_date = {'기준일자': formatted_date}
+                movie_with_date.update(movie)
+                all_data.append(movie_with_date)
                 
         except Exception:
             # 에러 발생 시 해당 날짜를 failure에 기록하고 계속 진행
-            failed_dates.append(target_dt)
+            failed_dates.append(formatted_date)
             continue
 
     # 작업 완료 후 진행 표시줄 숨기기
@@ -103,13 +109,12 @@ def fetch_one_year_boxoffice(api_key):
     
     # ---------------------------------------------------------------
     # [3] 데이터 전처리 (숫자형으로 변환)
-    # API에서 문자열로 넘어온 숫자 데이터를 실제 숫자형으로 바꿔줍니다.
     # ---------------------------------------------------------------
     if not df.empty:
+        # 문자열로 들어오는 숫자 컬럼들을 실제 숫자 데이터로 바꿉니다.
         numeric_columns = ['rank', 'rankInten', 'audiCnt', 'audiAcc', 'scrnCnt', 'showCnt']
         for col in numeric_columns:
             if col in df.columns:
-                # 숫자로 변환할 수 없는 값은 NaN(빈값) 처리 후 0으로 채움
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
                 
     return df, failed_dates
