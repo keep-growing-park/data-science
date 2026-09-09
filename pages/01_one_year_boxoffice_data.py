@@ -1,202 +1,229 @@
-import streamlit as st
-import pandas as pd
-import requests
+import time
 from datetime import datetime, timedelta
+import pandas as pd
 import pytz
+import requests
+import streamlit as st
 
-# 페이지 기본 설정 (가로 너비를 넓게 설정)
-st.set_page_config(page_title="1년치 박스오피스 데이터 조회", layout="wide")
+# ==========================================
+# 1. 페이지 기본 설정 (넓은 레이아웃 적용)
+# ==========================================
+st.set_page_config(
+    page_title="KOBIS 1개년 박스오피스 수집기",
+    page_icon="🎬",
+    layout="wide",  # 화면 전체를 활용하는 Wide 모드 설정
+)
 
-# -------------------------------------------------------------------
-# [1] API 키 불러오기 및 기본 처리
-# Streamlit secrets에서 KOBIS_KEY를 가져옵니다.
-# -------------------------------------------------------------------
-try:
-    API_KEY = st.secrets["KOBIS_KEY"]
-except Exception:
-    API_KEY = None
+st.title("🎬 KOBIS 최근 1년(365일) 박스오피스 데이터 수집기")
+st.markdown(
+    """
+    이 프로그램은 영화진흥위원회(KOBIS) API를 활용하여 **어제 날짜부터 과거 365일간**의 일별 박스오피스 데이터를 자동으로 수집합니다.
+    """
+)
 
-st.title("🎬 KOBIS 1년치 박스오피스 데이터 수집 및 조회")
-
-# API 키가 등록되지 않았을 때 사용자에게 안내 문구를 띄웁니다.
-if not API_KEY:
-    st.error("⚠️ API 키를 넣어주세요. (.streamlit/secrets.toml 파일에 KOBIS_KEY를 설정해야 합니다.)")
+# ==========================================
+# 2. API 키 보안 검사 (Streamlit secrets 활용)
+# ==========================================
+# secrets.toml 파일에 API 키가 제대로 설정되어 있는지 확인합니다.
+# 코드에 직접 키를 작성하면 GitHub 등에 올려졌을 때 보안 문제가 발생할 수 있습니다.
+if "KOBIS_KEY" not in st.secrets:
+    st.error(
+        "❌ API 키를 찾을 수 없습니다! "
+        "프로젝트 폴더 내 `.streamlit/secrets.toml` 파일에 "
+        "`KOBIS_KEY = '발급받은_키'` 형태로 설정해주세요."
+    )
+    # API 키가 없으면 아래 코드를 더 이상 실행하지 않고 중단합니다.
     st.stop()
 
+# 저장되어 있는 API 키를 변수에 할당합니다.
+API_KEY = st.secrets["KOBIS_KEY"]
 
-# -------------------------------------------------------------------
-# [2] 1년치 박스오피스 데이터 수집 함수 (캐싱 적용)
-# @st.cache_data를 사용하여 이미 가져온 데이터는 재요청 없이 기억해둡니다.
-# -------------------------------------------------------------------
-@st.cache_data(ttl=86400 * 30)  # 한 번 가져온 데이터는 한 달간 재사용합니다.
-def fetch_one_year_boxoffice(api_key):
-    # 서버 시계와 상관없이 한국 표준시(KST) 기준으로 날짜를 계산합니다.
-    tz_kst = pytz.timezone('Asia/Seoul')
-    now_kst = datetime.now(tz_kst)
-    
-    # '어제' 날짜를 구합니다 (오늘 데이터는 집계 전이므로 어제부터 시작)
-    yesterday = now_kst - timedelta(days=1)
-    
-    # 어제부터 과거 365일간의 날짜 객체 목록을 만듭니다.
-    dates = [yesterday - timedelta(days=i) for i in range(365)]
-    
-    all_data = []      # 모든 일자별 영화 데이터를 담을 리스트
-    failed_dates = []  # 데이터를 불러오지 못한 날짜를 담을 리스트
-    
-    # 화면에 수집 진행 상황을 보여주는 바(Bar)와 텍스트를 준비합니다.
+
+# ==========================================
+# 3. KST 기준 과거 365일 날짜 리스트 생성 함수
+# ==========================================
+def get_past_365_days():
+    """한국 표준시(KST) 기준으로 어제부터 과거 365일간의 YYYYMMDD 날짜 리스트를 생성합니다."""
+    # pytz 라이브러리를 사용하여 서울 타임존 지정
+    tz_kst = pytz.timezone("Asia/Seoul")
+    today_kst = datetime.now(tz_kst)
+
+    # 오늘 날짜는 집계 중일 수 있으므로 어제 날짜를 기준으로 설정
+    yesterday = today_kst - timedelta(days=1)
+
+    date_list = []
+    # 어제(0일 전)부터 과거 364일 전까지 총 365일 반복
+    for i in range(365):
+        target_date = yesterday - timedelta(days=i)
+        # API에서 요구하는 YYYYMMDD 형태로 포맷팅 (예: 20260908)
+        date_list.append(target_date.strftime("%Y%m%d"))
+
+    return date_list
+
+
+# ==========================================
+# 4. 데이터 수집 함수 (캐싱 적용)
+# ==========================================
+# @st.cache_data를 적용하면 실행 결과를 저장(캐시)해두므로
+# 한 번 불러온 데이터를 30일 동안 다시 API 요청 없이 빠르게 재사용할 수 있습니다.
+@st.cache_data(ttl=3600 * 24 * 30, show_spinner=False)
+def fetch_boxoffice_data_for_365_days(api_key):
+    """365일치 박스오피스 데이터를 수집하여 하나의 데이터프레임으로 변환하는 함수"""
+    dates = get_past_365_days()
+    all_records = []
+    failed_dates = []
+
+    # API 요청 기본 URL 및 진행률 표시줄 준비
+    url = "https://www.kobis.or.kr/kobisopenapi/webservice/rest/boxoffice/searchDailyBoxOfficeList.json"
     progress_bar = st.progress(0)
     status_text = st.empty()
+
     total_days = len(dates)
-    
-    base_url = "https://www.kobis.or.kr/kobisopenapi/webservice/rest/boxoffice/searchDailyBoxOfficeList.json"
-    
-    # 365일 데이터를 하루씩 반복해서 가져옵니다.
-    for index, date_obj in enumerate(dates):
-        # API 요청용 날짜 형식: YYYYMMDD (예: 20260908)
-        target_dt = date_obj.strftime('%Y%m%d')
-        # 화면 표기용 날짜 형식: YYYY-MM-DD (예: 2026-09-08)
-        formatted_date = date_obj.strftime('%Y-%m-%d')
-        
-        # 진행 상황 안내 문구 업데이트
-        status_text.text(f"⏳ 데이터 수집 중... ({index + 1}/{total_days} 일) - 기준일자: {formatted_date}")
-        progress_bar.progress((index + 1) / total_days)
-        
+
+    for idx, dt in enumerate(dates):
+        # UI 업데이트: 진행 상황 안내
+        current_step = idx + 1
+        progress_bar.progress(current_step / total_days)
+        status_text.text(
+            f"⏳ 데이터 수집 중... ({current_step}/{total_days}일) - 조회일자: {dt}"
+        )
+
+        params = {"key": api_key, "targetDt": dt}
+
         try:
-            params = {
-                'key': api_key,
-                'targetDt': target_dt
-            }
-            # API 요청 보내기 (타임아웃 10초 설정)
-            response = requests.get(base_url, params=params, timeout=10)
-            
-            # 네트워크 요청 실패 시 해당 날짜 건너뛰기
+            response = requests.get(url, params=params, timeout=10)
+
+            # 1) 요청 실패 (상태코드가 200 OK가 아닌 경우)
             if response.status_code != 200:
-                failed_dates.append(formatted_date)
+                failed_dates.append(dt)
                 continue
-            
+
             data = response.json()
-            
-            # API 내부 에러(faultInfo)가 포함되어 있는 경우 건너뛰기
-            if 'faultInfo' in data:
-                failed_dates.append(formatted_date)
+
+            # 2) 응답 결과에 faultInfo(에러 정보)가 들어있는 경우
+            if "faultInfo" in data:
+                failed_dates.append(dt)
                 continue
-                
-            box_office_result = data.get('boxOfficeResult', {})
-            daily_list = box_office_result.get('dailyBoxOfficeList', [])
-            
-            # 영화 목록이 비어있는 경우 건너뛰기
+
+            daily_list = data.get("boxOfficeResult", {}).get(
+                "dailyBoxOfficeList", []
+            )
+
+            # 3) 박스오피스 리스트 데이터가 비어있는 경우
             if not daily_list:
-                failed_dates.append(formatted_date)
+                failed_dates.append(dt)
                 continue
-            
-            # 맨 앞 컬럼에 '기준일자'를 넣어줍니다.
-            for movie in daily_list:
-                movie_with_date = {'기준일자': formatted_date}
-                movie_with_date.update(movie)
-                all_data.append(movie_with_date)
-                
+
+            # 정상 응답 시 '기준일자' 컬럼을 추가하며 레코드 저장
+            # YYYYMMDD -> YYYY-MM-DD 변환
+            formatted_date = f"{dt[:4]}-{dt[4:6]}-{dt[6:]}"
+
+            for item in daily_list:
+                item["기준일자"] = formatted_date
+                all_records.append(item)
+
         except Exception:
-            # 에러 발생 시 해당 날짜를 failure에 기록하고 계속 진행
-            failed_dates.append(formatted_date)
+            # 4) 네트워크 미연결 등 기타 예상치 못한 예외 발생 시 건너뛰기
+            failed_dates.append(dt)
             continue
 
-    # 작업 완료 후 진행 표시줄 숨기기
+    # 수집 안내 문구 및 진행바 제거
     progress_bar.empty()
     status_text.empty()
-    
-    # 수집된 데이터를 판다스 데이터프레임으로 변환
-    df = pd.DataFrame(all_data)
-    
-    # ---------------------------------------------------------------
-    # [3] 데이터 전처리 (영문 컬럼명을 한글로 변경 및 숫자 데이터 변환)
-    # ---------------------------------------------------------------
-    if not df.empty:
-        # 1. API 영문 속성 이름을 학생들이 이해하기 쉬운 한글 이름으로 매핑합니다.
-        column_mapping = {
-            'rnum': '순번',
-            'rank': '박스오피스순위',
-            'rankInten': '전일대비순위증감',
-            'rankOldAndNew': '신규진입여부',
-            'movieCd': '영화대표코드',
-            'movieNm': '영화명',
-            'openDt': '개봉일',
-            'salesAmt': '해당일매출액',
-            'salesShare': '매출점유율',
-            'salesInten': '전일대비매출증감',
-            'salesChange': '전일대비매출증감비율',
-            'salesAcc': '누적매출액',
-            'audiCnt': '해당일관객수',
-            'audiInten': '전일대비관객수증감',
-            'audiChange': '전일대비관객수증감비율',
-            'audiAcc': '누적관객수',
-            'scrnCnt': '스크린수',
-            'showCnt': '상영횟수'
-        }
-        
-        # 데이터프레임의 컬럼명을 한글로 일괄 변경합니다.
-        df = df.rename(columns=column_mapping)
-        
-        # 2. 숫자로 처리할 한글 컬럼 목록
-        numeric_columns = [
-            '순번', '박스오피스순위', '전일대비순위증감', 
-            '해당일매출액', '매출점유율', '전일대비매출증감', '전일대비매출증감비율', '누적매출액',
-            '해당일관객수', '전일대비관객수증감', '전일대비관객수증감비율', '누적관객수',
-            '스크린수', '상영횟수'
-        ]
-        
-        # 문자열로 온 숫자 값들을 실제 숫자형(Int/Float)으로 변경합니다.
-        for col in numeric_columns:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-                
+
+    # 데이터가 전혀 수집되지 않은 경우 빈 데이터프레임 반환
+    if not all_records:
+        return pd.DataFrame(), failed_dates
+
+    # 전체 수집 결과를 판다스 데이터프레임으로 변환
+    df = pd.DataFrame(all_records)
+
+    # ==========================================
+    # 5. 데이터 전처리
+    # ==========================================
+    # 사용할 6개 컬럼 선정 및 한글 이름 매핑
+    column_mapping = {
+        "기준일자": "기준일자",
+        "rank": "박스오피스순위",
+        "movieNm": "영화명",
+        "audiCnt": "해당일관객수",
+        "audiAcc": "누적관객수",
+        "scrnCnt": "스크린수",
+        "showCnt": "상영횟수",
+    }
+
+    # 존재하는 컬럼만 선별하여 추출 후 이름 변경
+    available_cols = [c for c in column_mapping.keys() if c in df.columns]
+    df = df[available_cols]
+    df = df.rename(columns=column_mapping)
+
+    # 숫자로 변환해야 하는 컬럼들 지정
+    numeric_cols = [
+        "박스오피스순위",
+        "해당일관객수",
+        "누적관객수",
+        "스크린수",
+        "상영횟수",
+    ]
+
+    # pd.to_numeric을 사용해 문자열 형태의 숫자를 정수/실수형으로 변환 (변환 불가 시 0으로 채움)
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
+
     return df, failed_dates
 
 
-# -------------------------------------------------------------------
-# [4] 데이터 수집 실행 버튼
-# -------------------------------------------------------------------
-if st.button("🚀 1년치 데이터 수집 시작"):
-    df, failed_dates = fetch_one_year_boxoffice(API_KEY)
-    
-    # 가져온 데이터프레임을 세션 상태에 저장하여 화면에 유지
-    st.session_state['df'] = df
-    st.session_state['failed_dates'] = failed_dates
+# ==========================================
+# 6. 세션 상태(session_state) 초기화
+# ==========================================
+# 화면이 새로고침되어도 수집한 데이터가 사라지지 않도록 st.session_state에 저장합니다.
+if "boxoffice_df" not in st.session_state:
+    st.session_state["boxoffice_df"] = None
+if "failed_dates" not in st.session_state:
+    st.session_state["failed_dates"] = None
 
+# ==========================================
+# 7. 버튼 및 메인 로직
+# ==========================================
+# 데이터 수집 시작 버튼
+if st.button("🚀 최근 365일치 박스오피스 데이터 수집 시작"):
+    with st.spinner("데이터 수집을 시작합니다..."):
+        df_result, fails = fetch_boxoffice_data_for_365_days(API_KEY)
+        st.session_state["boxoffice_df"] = df_result
+        st.session_state["failed_dates"] = fails
 
-# -------------------------------------------------------------------
-# [5] 데이터 수집 결과 출력 & 표 형태로 화면에 표시
-# -------------------------------------------------------------------
-if 'df' in st.session_state and st.session_state['df'] is not None:
-    df = st.session_state['df']
-    failed_dates = st.session_state['failed_dates']
-    
-    st.write("---")
-    st.success(f"데이터 수집 완료! 총 **{len(df):,}개**의 영화 순위 데이터가 로드되었습니다.")
-    
-    # 실패/누락된 날짜 안내
-    if failed_dates:
-        st.warning(f"⚠️ 총 {len(failed_dates)}개 날짜 데이터를 가져오지 못했습니다. (누락 일자 수: {len(failed_dates)}일)")
-    else:
-        st.info("🎉 365일 전체 날짜 데이터를 누락 없이 가져왔습니다.")
+# 데이터가 세션에 존재하는 경우 화면 출력
+if st.session_state["boxoffice_df"] is not None:
+    df = st.session_state["boxoffice_df"]
+    fails = st.session_state["failed_dates"]
 
-    # CSV 변환 (엑셀에서 한글 깨짐 방지를 위해 utf-8-sig 인코딩 사용)
-    csv_data = df.to_csv(index=False).encode('utf-8-sig')
+    st.divider()
 
-    # 다운로드 버튼 및 제목 헤더 영역
-    col_title, col_download = st.columns([3, 1])
-    
-    with col_title:
-        st.subheader("📋 수집된 박스오피스 전체 데이터")
-        
-    with col_download:
-        # CSV 다운로드 버튼
+    if not df.empty:
+        # 결과 메시지 출력
+        st.success(f"🎉 총 **{len(df):,}개**의 데이터 수집 완료!")
+
+        if fails:
+            st.warning(
+                f"⚠️ 데이터 수집 실패 날짜: 총 **{len(fails)}일** (해당 날짜는 건너뛰었습니다.)"
+            )
+        else:
+            st.balloons()
+            st.info("🎊 365일 모든 날짜의 데이터를 한 건의 누락 없이 성공적으로 가져왔습니다!")
+
+        # CSV 다운로드 기능 제공 (한글 깨짐 방지를 위해 utf-8-sig 활용)
+        csv_data = df.to_csv(index=False, encoding="utf-8-sig")
         st.download_button(
-            label="💾 CSV 파일로 다운로드",
+            label="📥 CSV 파일로 다운로드하기",
             data=csv_data,
             file_name="kobis_1year_boxoffice.csv",
             mime="text/csv",
-            use_container_width=True
         )
 
-    # 메인 화면에 한글 컬럼으로 바뀐 데이터를 표(Table) 형태로 직접 보여줍니다.
-    st.dataframe(df, use_container_width=True, height=600)
+        st.subheader("📊 수집된 박스오피스 전체 데이터")
+        # 데이터프레임을 전체 화면 너비로 깔끔하게 표시
+        st.dataframe(df, use_container_width=True)
+
+    else:
+        st.error("❌ 수집된 데이터가 없습니다. API 키 상태를 확인해주세요.")
