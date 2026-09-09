@@ -89,7 +89,7 @@ def fetch_one_year_boxoffice(api_key):
                 failed_dates.append(formatted_date)
                 continue
             
-            # 맨 앞 컬럼에 구분하기 쉬운 'YYYY-MM-DD' 형식 날짜를 넣어줍니다.
+            # 맨 앞 컬럼에 '기준일자'를 넣어줍니다.
             for movie in daily_list:
                 movie_with_date = {'기준일자': formatted_date}
                 movie_with_date.update(movie)
@@ -108,11 +108,43 @@ def fetch_one_year_boxoffice(api_key):
     df = pd.DataFrame(all_data)
     
     # ---------------------------------------------------------------
-    # [3] 데이터 전처리 (숫자형으로 변환)
+    # [3] 데이터 전처리 (영문 컬럼명을 한글로 변경 및 숫자 데이터 변환)
     # ---------------------------------------------------------------
     if not df.empty:
-        # 문자열로 들어오는 숫자 컬럼들을 실제 숫자 데이터로 바꿉니다.
-        numeric_columns = ['rank', 'rankInten', 'audiCnt', 'audiAcc', 'scrnCnt', 'showCnt']
+        # 1. API 영문 속성 이름을 학생들이 이해하기 쉬운 한글 이름으로 매핑합니다.
+        column_mapping = {
+            'rnum': '순번',
+            'rank': '박스오피스순위',
+            'rankInten': '전일대비순위증감',
+            'rankOldAndNew': '신규진입여부',
+            'movieCd': '영화대표코드',
+            'movieNm': '영화명',
+            'openDt': '개봉일',
+            'salesAmt': '해당일매출액',
+            'salesShare': '매출점유율',
+            'salesInten': '전일대비매출증감',
+            'salesChange': '전일대비매출증감비율',
+            'salesAcc': '누적매출액',
+            'audiCnt': '해당일관객수',
+            'audiInten': '전일대비관객수증감',
+            'audiChange': '전일대비관객수증감비율',
+            'audiAcc': '누적관객수',
+            'scrnCnt': '스크린수',
+            'showCnt': '상영횟수'
+        }
+        
+        # 데이터프레임의 컬럼명을 한글로 일괄 변경합니다.
+        df = df.rename(columns=column_mapping)
+        
+        # 2. 숫자로 처리할 한글 컬럼 목록
+        numeric_columns = [
+            '순번', '박스오피스순위', '전일대비순위증감', 
+            '해당일매출액', '매출점유율', '전일대비매출증감', '전일대비매출증감비율', '누적매출액',
+            '해당일관객수', '전일대비관객수증감', '전일대비관객수증감비율', '누적관객수',
+            '스크린수', '상영횟수'
+        ]
+        
+        # 문자열로 온 숫자 값들을 실제 숫자형(Int/Float)으로 변경합니다.
         for col in numeric_columns:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
@@ -166,5 +198,5 @@ if 'df' in st.session_state and st.session_state['df'] is not None:
             use_container_width=True
         )
 
-    # 메인 화면에 데이터를 표(Table) 형태로 직접 보여줍니다.
+    # 메인 화면에 한글 컬럼으로 바뀐 데이터를 표(Table) 형태로 직접 보여줍니다.
     st.dataframe(df, use_container_width=True, height=600)
