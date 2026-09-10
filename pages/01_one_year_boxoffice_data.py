@@ -160,12 +160,6 @@ if "boxoffice_df" not in st.session_state:
 if "failed_dates" not in st.session_state:
     st.session_state["failed_dates"] = None
 
-# 사이드바에 수동 캐시 초기화 버튼 추가 (테스트 및 개발 편의용)
-with st.sidebar:
-    st.subheader("⚙️ 옵션")
-    if st.button("🧹 수동으로 캐시 비우기"):
-        st.cache_data.clear()
-        st.success("캐시가 초기화되었습니다!")
 
 # ==========================================
 # 7. 버튼 및 메인 로직
