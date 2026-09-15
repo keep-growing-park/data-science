@@ -10,12 +10,16 @@ st.caption("Spotify Official Web API 기반 | 회귀·군집·연관 분석 실�
 # 1시간 동안 API 호출 결과를 메모리에 저장하는 캐싱 함수
 @st.cache_data(ttl=3600)
 def fetch_spotify_kpop_data():
-    # Streamlit Secrets에서 Client ID & Secret 로드
-    client_id = st.secrets["SPOTIPY_CLIENT_ID"].strip()
-    client_secret = st.secrets["SPOTIPY_CLIENT_SECRET"].strip()
+    # Streamlit Secrets에서 Client ID & Secret 로드 (공백 자동 제거)
+    client_id = str(st.secrets["SPOTIPY_CLIENT_ID"]).strip()
+    client_secret = str(st.secrets["SPOTIPY_CLIENT_SECRET"]).strip()
 
-    # Spotify 공식 Client Credentials 인증 방식
-    auth_manager = SpotifyClientCredentials(client_id=client_id, client_secret=client_secret)
+    # 이전 토큰 캐시를 사용하지 않고 매번 새 인증을 수행하도록 설정 (cache_handler=None)
+    auth_manager = SpotifyClientCredentials(
+        client_id=client_id, 
+        client_secret=client_secret,
+        cache_handler=None
+    )
     sp = spotipy.Spotify(auth_manager=auth_manager)
 
     # Spotify 'Top 50 - 대한민국' 공식 플레이리스트 ID
