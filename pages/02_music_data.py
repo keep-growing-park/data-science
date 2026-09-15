@@ -1,47 +1,56 @@
+import sys
+import subprocess
 import pandas as pd
-import requests
-from bs4 import BeautifulSoup
 import streamlit as st
+
+# 차단 우회용 curl_cffi 및 bs4 자동 설치
+try:
+    from curl_cffi import requests as curl_requests
+    from bs4 import BeautifulSoup
+except ModuleNotFoundError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "curl_cffi", "beautifulsoup4"])
+    from curl_cffi import requests as curl_requests
+    from bs4 import BeautifulSoup
 
 st.set_page_config(page_title="Melon TOP 100 데이터 수집기", layout="wide")
 st.title("🎵 멜론(Melon) 실시간 TOP 100 데이터 수집기")
-st.caption("요즘 학생들이 가장 많이 듣는 멜론 실시간 차트의 100% 실제 데이터를 수집합니다.")
+st.caption("클라우드 서버 차단을 우회하여 멜론 실시간 TOP 100 실제 데이터를 수집합니다.")
 
 if "kpop_df" not in st.session_state:
     st.session_state.kpop_df = None
 
 if st.button("🚀 멜론 TOP 100 실제 데이터 수집 시작"):
-    with st.spinner("실제 멜론 차트에서 최신 음원 정보를 불러오는 중..."):
+    with st.spinner("멜론 보안 서버 검증 통과 중..."):
         try:
-            # 멜론 보안 차단을 우회하기 위한 브라우저 헤더 설정
+            url = "https://www.melon.com/chart/index.htm"
             headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
                 'Referer': 'https://www.melon.com/'
             }
             
-            url = "https://www.melon.com/chart/index.htm"
-            response = requests.get(url, headers=headers, timeout=10)
+            # Chrome 브라우저의 TLS 지문(Fingerprint)을 복제하여 해외 IP 차단 우회
+            response = curl_requests.get(url, headers=headers, impersonate="chrome120", timeout=15)
             soup = BeautifulSoup(response.text, 'html.parser')
             
-            # 멜론 1~50위, 51~100위 태그 추출
             lst50 = soup.select('tr.lst50')
             lst100 = soup.select('tr.lst100')
             tr_list = lst50 + lst100
             
             data = []
             for tr in tr_list:
-                # 순위
-                rank = int(tr.select_one('span.rank').text.strip())
+                rank_elem = tr.select_one('span.rank')
+                if not rank_elem:
+                    continue
+                rank = int(rank_elem.text.strip())
                 
-                # 곡명 (내부 불필요 텍스트 정제)
                 title_elem = tr.select_one('div.ellipsis.rank01 a')
                 title = title_elem.text.strip() if title_elem else ""
                 
-                # 가수명
                 artist_elem = tr.select_one('div.ellipsis.rank02 > a')
                 artist = artist_elem.text.strip() if artist_elem else ""
                 
-                # 앨범명
                 album_elem = tr.select_one('div.ellipsis.rank03 a')
                 album = album_elem.text.strip() if album_elem else ""
                 
@@ -50,22 +59,21 @@ if st.button("🚀 멜론 TOP 100 실제 데이터 수집 시작"):
                     '곡명': title,
                     '가수명': artist,
                     '앨범명': album,
-                    '추천점수': 101 - rank,            # 회귀분석 Y값 (1위 100점 ~ 100위 1점)
-                    '제목_글자수': len(title),          # 회귀/군집 분석 X값
-                    '가수명_글자수': len(artist)        # 회귀/군집 분석 X값
+                    '추천점수': 101 - rank,
+                    '제목_글자수': len(title),
+                    '가수명_글자수': len(artist)
                 })
 
             df = pd.DataFrame(data)
             
-            if not df.empty and len(df) == 100:
+            if not df.empty and len(df) >= 50:
                 st.session_state.kpop_df = df
-                st.success(f"수집 성공! 현재 멜론 TOP 100의 실제 데이터를 성공적으로 불러왔습니다.")
+                st.success(f"수집 성공! 멜론 TOP 100 실제 데이터({len(df)}개)를 정상 수집했습니다.")
             else:
-                st.warning(f"총 {len(df)}개 데이터가 수집되었습니다.")
-                st.session_state.kpop_df = df
+                st.error("데이터 추출에 실패했습니다.")
 
         except Exception as e:
-            st.error(f"멜론 데이터 수집 실패: {e}")
+            st.error(f"수집 오류 발생: {e}")
 
 # 결과 화면 출력 및 CSV 다운로드
 if st.session_state.kpop_df is not None and not st.session_state.kpop_df.empty:
