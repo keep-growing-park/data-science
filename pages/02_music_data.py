@@ -10,11 +10,11 @@ st.caption("Spotify Official Web API 기반 | 회귀·군집·연관 분석 실�
 # 1시간 동안 API 호출 결과를 메모리에 저장하는 캐싱 함수
 @st.cache_data(ttl=3600)
 def fetch_spotify_kpop_data():
-    # Streamlit Secrets에서 Client ID & Secret 로드 (공백 자동 제거)
+    # Streamlit Secrets에서 Client ID & Secret 로드
     client_id = str(st.secrets["SPOTIPY_CLIENT_ID"]).strip()
     client_secret = str(st.secrets["SPOTIPY_CLIENT_SECRET"]).strip()
 
-    # 이전 토큰 캐시를 사용하지 않고 매번 새 인증을 수행하도록 설정 (cache_handler=None)
+    # Client Credentials 인증 (서버 대 서버)
     auth_manager = SpotifyClientCredentials(
         client_id=client_id, 
         client_secret=client_secret,
@@ -22,13 +22,17 @@ def fetch_spotify_kpop_data():
     )
     sp = spotipy.Spotify(auth_manager=auth_manager)
 
-    # Spotify 'Top 50 - 대한민국' 공식 플레이리스트 ID
-    playlist_id = '37i9dQZEVXbJx5231P32uL'
-    results = sp.playlist_items(playlist_id, limit=50)
+    # 사용자 권한 제한이 없는 검색 API로 K-POP 트랙 수집 (최신/인기 K-POP 50곡)
+    # genre:"k-pop" 또는 "k-pop" 검색어 활용
+    results = sp.search(q='genre:"k-pop"', type='track', limit=50, market='KR')
+
+    items = results.get('tracks', {}).get('items', [])
+
+    # 인기도 순으로 정렬
+    items = sorted(items, key=lambda x: x.get('popularity', 0), reverse=True)
 
     data = []
-    for idx, item in enumerate(results.get('items', [])):
-        track = item.get('track')
+    for idx, track in enumerate(items):
         if not track:
             continue
         
