@@ -22,18 +22,18 @@ def fetch_spotify_kpop_data():
     )
     sp = spotipy.Spotify(auth_manager=auth_manager)
 
-    # 400 Invalid limit 에러 방지를 위해 limit를 25개씩 나누어 50개 수집
+    # Spotify Search API 최신 limit 제한 규격(최대 10)에 맞춰 offset 페이징으로 50개 수집
     raw_items = []
-    for offset in [0, 25]:
-        results = sp.search(q='k-pop', type='track', limit=25, offset=offset, market='KR')
+    for offset in range(0, 50, 10):  # 0, 10, 20, 30, 40 (총 5회 요청)
+        results = sp.search(q='k-pop', type='track', limit=10, offset=offset, market='KR')
         tracks = results.get('tracks', {}).get('items', [])
         raw_items.extend(tracks)
 
-    # 인기도 순으로 정렬
+    # 인기도 순 정렬
     raw_items = sorted(raw_items, key=lambda x: x.get('popularity', 0), reverse=True)
 
     data = []
-    seen_tracks = set() # 중복 곡 제거용
+    seen_tracks = set() # 중복 트랙 제거용
 
     for track in raw_items:
         if not track:
@@ -79,7 +79,7 @@ def fetch_spotify_kpop_data():
             break
 
     df = pd.DataFrame(data)
-    # 인기도 순 정렬 후 순위 부여
+    # 순위 부여
     df.insert(0, '순위', range(1, len(df) + 1))
     return df
 
