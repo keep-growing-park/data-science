@@ -1,36 +1,30 @@
 import pandas as pd
-import requests
+import spotipy
+from spotipy.oauth2 import SpotifyClientCredentials
 import streamlit as st
 
 st.set_page_config(page_title="수업용 K-POP 데이터 수집기", layout="wide")
 st.title("🎵 K-POP 실시간 데이터 수집 및 정제")
-st.caption("Spotify Soloist API 기반 | 회귀·군집·연관 분석 실습용 데이터셋 제공")
+st.caption("Spotify Official Web API 기반 | 회귀·군집·연관 분석 실습용 데이터셋 제공")
 
 # 1시간 동안 API 호출 결과를 메모리에 저장하는 캐싱 함수
 @st.cache_data(ttl=3600)
 def fetch_spotify_kpop_data():
-    # Secrets(비밀금고)에서 발급받으신 API 키 로드
-    api_key = st.secrets["SPOTIPY_CLIENT_SECRET"]
+    # Streamlit Secrets에서 표준 Client ID & Secret 로드
+    client_id = st.secrets["SPOTIPY_CLIENT_ID"]
+    client_secret = st.secrets["SPOTIPY_CLIENT_SECRET"]
 
-    # Soloist API 헤더 인증 방식
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Accept": "application/json"
-    }
+    # Spotify 공식 Client Credentials 인증 방식
+    auth_manager = SpotifyClientCredentials(client_id=client_id, client_secret=client_secret)
+    sp = spotipy.Spotify(auth_manager=auth_manager)
 
-    # Spotify 공식 'Top 50 - 대한민국' 트랙 수집
-    url = "https://api.spotify.com/v1/playlists/37i9dQZEVXbJx5231P32uL/tracks?limit=50"
-    response = requests.get(url, headers=headers, timeout=10)
-    
-    if response.status_code != 200:
-        raise Exception(f"API 호출 실패 (상태 코드: {response.status_code}) - {response.text}")
-
-    res_json = response.json()
-    items = res_json.get('items', [])
+    # Spotify 'Top 50 - 대한민국' 공식 플레이리스트 ID
+    playlist_id = '37i9dQZEVXbJx5231P32uL'
+    results = sp.playlist_items(playlist_id, limit=50)
 
     data = []
-    for idx, item in enumerate(items):
-        track = item.get('track', {})
+    for idx, item in enumerate(results.get('items', [])):
+        track = item.get('track')
         if not track:
             continue
         
@@ -72,7 +66,7 @@ def fetch_spotify_kpop_data():
 
 # 데이터 수집 실행
 try:
-    with st.spinner("Spotify Soloist API 연결 및 1시간 캐시 데이터 처리 중..."):
+    with st.spinner("Spotify Official API 연결 및 1시간 캐시 데이터 처리 중..."):
         df = fetch_spotify_kpop_data()
 
     st.success("데이터 로드 완료 (수집 후 1시간 동안 빠른 캐시 데이터를 불러옵니다)")
