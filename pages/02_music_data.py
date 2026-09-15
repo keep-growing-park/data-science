@@ -12,30 +12,32 @@ if "kpop_df" not in st.session_state:
 if st.button("🚀 K-POP 음원 데이터 수집 시작"):
     with st.spinner("최신 K-POP 음원 데이터를 가져오는 중..."):
         try:
-            # iTunes K-Pop Top 100 음원 검색 API (안정성 100%)
-            url = "https://itunes.apple.com/search?term=kpop&limit=100&entity=song&country=kr"
+            # 1. iTunes 한국 인기 음원 Top 100 RSS Feed API
+            url = "https://itunes.apple.com/kr/rss/topsongs/limit=100/json"
             response = requests.get(url, timeout=10)
-            results = response.json().get('results', [])
+            res_json = response.json()
+            entries = res_json.get('feed', {}).get('entry', [])
 
             data = []
-            for track in results:
-                title = track.get('trackName', '')
-                artist = track.get('artistName', '')
+            for idx, entry in enumerate(entries):
+                title = entry.get('im:name', {}).get('label', '')
+                artist = entry.get('im:artist', {}).get('label', '')
                 
                 # 수치형 변수 추출 (회귀/군집 분석용)
-                duration_sec = int(track.get('trackTimeMillis', 0) / 1000)  # 밀리초 -> 초
-                release_year = int(track.get('releaseDate', '2026')[:4])    # 발매연도
-                track_number = track.get('trackNumber', 1)                 # 앨범 내 트랙 순번
-                price = track.get('trackPrice', 0.0)                        # 음원 가격
-
+                release_date = entry.get('im:releaseDate', {}).get('label', '')[:10]
+                release_year = int(release_date[:4]) if release_date else 2026
+                
+                # 순위 기반 임의의 가상 관심도 수치 및 글자수 변수
+                rank = idx + 1
+                
                 data.append({
+                    '순위': rank,
                     '곡명': title,
                     '가수명': artist,
-                    '재생시간_초': duration_sec,
                     '발매연도': release_year,
-                    '트랙순번': track_number,
                     '제목_글자수': len(title),
-                    '가수명_글자수': len(artist)
+                    '가수명_글자수': len(artist),
+                    '추천지수': 101 - rank  # 회귀/군집용 수치형 변수 (1위=100점, 100위=1점)
                 })
 
             st.session_state.kpop_df = pd.DataFrame(data)
