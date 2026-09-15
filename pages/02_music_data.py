@@ -4,7 +4,7 @@ from spotipy.oauth2 import SpotifyClientCredentials
 import streamlit as st
 
 st.set_page_config(page_title="수업용 K-POP 데이터 수집기", layout="wide")
-st.title("🎵 K-POP 실시간 데이터 수집 및 정제")
+st.title("🎵 K-POP 실시간 데이터 수집 및 정제 (Top 100)")
 st.caption("Spotify Official Web API 기반 | 회귀·군집·연관 분석 실습용 데이터셋 제공")
 
 # 1시간 동안 API 호출 결과를 메모리에 저장하는 캐싱 함수
@@ -22,9 +22,9 @@ def fetch_spotify_kpop_data():
     )
     sp = spotipy.Spotify(auth_manager=auth_manager)
 
-    # Spotify Search API 최신 limit 제한 규격(최대 10)에 맞춰 offset 페이징으로 50개 수집
+    # Spotify API limit 규격(10개)에 맞춰 offset 페이징으로 100개 후보 수집 (0~90)
     raw_items = []
-    for offset in range(0, 50, 10):  # 0, 10, 20, 30, 40 (총 5회 요청)
+    for offset in range(0, 100, 10):  # 총 10회 요청
         results = sp.search(q='k-pop', type='track', limit=10, offset=offset, market='KR')
         tracks = results.get('tracks', {}).get('items', [])
         raw_items.extend(tracks)
@@ -75,7 +75,8 @@ def fetch_spotify_kpop_data():
             '연관분석_태그': artist_tag
         })
 
-        if len(data) >= 50:
+        # Top 100 채우면 종료
+        if len(data) >= 100:
             break
 
     df = pd.DataFrame(data)
@@ -85,10 +86,10 @@ def fetch_spotify_kpop_data():
 
 # 데이터 수집 실행
 try:
-    with st.spinner("Spotify Official API 연결 및 1시간 캐시 데이터 처리 중..."):
+    with st.spinner("Spotify Official API 연결 및 100개 데이터 수집 중..."):
         df = fetch_spotify_kpop_data()
 
-    st.success("데이터 로드 완료 (수집 후 1시간 동안 빠른 캐시 데이터를 불러옵니다)")
+    st.success(f"데이터 로드 완료! 총 {len(df)}개의 K-POP 음원 데이터를 불러왔습니다.")
 
     # 탭 구성: 데이터 확인 및 분석 가이드
     tab1, tab2 = st.tabs(["📊 전체 데이터프레임", "📘 수업 활용 가이드"])
@@ -99,9 +100,9 @@ try:
         # CSV 다운로드
         csv_data = df.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
         st.download_button(
-            label="📥 수업용 kpop_analysis_data.csv 다운로드",
+            label="📥 수업용 kpop_analysis_data_100.csv 다운로드",
             data=csv_data,
-            file_name="kpop_analysis_data.csv",
+            file_name="kpop_analysis_data_100.csv",
             mime="text/csv"
         )
 
@@ -113,7 +114,7 @@ try:
         
         **2. 군집분석 (Clustering)**
         * 수치형 K-Means: `재생시간_초`, `제목_글자수`, `인기도(Y)` 3차원 클러스터링
-        * 범주형 데이터: `재생시간_그룹`과 순위 구간별 집단 비교
+        * 범주형 데이터: `재생시간_그룹`과 순위 구간별 집단 비교 (Top 20 vs 하위권)
         
         **3. 연관분석 (Association Rules)**
         * `가수명`과 `연관분석_태그` 항목을 활용한 차트 상위권 동시 진입/인기 패턴 분석
