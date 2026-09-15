@@ -3,4 +3,4 @@ requests
 pandas
 plotly
 pytz
-ytmusicapi
+beautifulsoup4
