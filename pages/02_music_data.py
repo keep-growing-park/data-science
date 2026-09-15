@@ -14,7 +14,7 @@ def fetch_spotify_kpop_data():
     client_id = str(st.secrets["SPOTIPY_CLIENT_ID"]).strip()
     client_secret = str(st.secrets["SPOTIPY_CLIENT_SECRET"]).strip()
 
-    # Client Credentials 인증 (서버 대 서버)
+    # Client Credentials 인증
     auth_manager = SpotifyClientCredentials(
         client_id=client_id, 
         client_secret=client_secret,
@@ -22,29 +22,35 @@ def fetch_spotify_kpop_data():
     )
     sp = spotipy.Spotify(auth_manager=auth_manager)
 
-    # 사용자 권한 제한이 없는 검색 API로 K-POP 트랙 수집 (최신/인기 K-POP 50곡)
-    # genre:"k-pop" 또는 "k-pop" 검색어 활용
-    results = sp.search(q='genre:"k-pop"', type='track', limit=50, market='KR')
-
-    items = results.get('tracks', {}).get('items', [])
+    # 400 Invalid limit 에러 방지를 위해 limit를 25개씩 나누어 50개 수집
+    raw_items = []
+    for offset in [0, 25]:
+        results = sp.search(q='k-pop', type='track', limit=25, offset=offset, market='KR')
+        tracks = results.get('tracks', {}).get('items', [])
+        raw_items.extend(tracks)
 
     # 인기도 순으로 정렬
-    items = sorted(items, key=lambda x: x.get('popularity', 0), reverse=True)
+    raw_items = sorted(raw_items, key=lambda x: x.get('popularity', 0), reverse=True)
 
     data = []
-    for idx, track in enumerate(items):
+    seen_tracks = set() # 중복 곡 제거용
+
+    for track in raw_items:
         if not track:
             continue
         
-        # 1. 기본 실시간 음원 데이터
-        rank = idx + 1
+        track_id = track.get('id')
+        if track_id in seen_tracks:
+            continue
+        seen_tracks.add(track_id)
+
         title = track.get('name', '')
         artist = track.get('artists', [{}])[0].get('name', '')
         album = track.get('album', {}).get('name', '')
         popularity = track.get('popularity', 0)                  # 스포티파이 실제 인기도 (0~100)
         duration_sec = round(track.get('duration_ms', 0) / 1000) # 재생시간(초)
 
-        # 2. 수업용 파생 변수 생성
+        # 수업용 파생 변수 생성
         title_length = len(title)
         artist_length = len(artist)
         
@@ -58,7 +64,6 @@ def fetch_spotify_kpop_data():
         artist_tag = f"Artist_{artist}"
 
         data.append({
-            '순위': rank,
             '곡명': title,
             '가수명': artist,
             '앨범명': album,
@@ -70,7 +75,13 @@ def fetch_spotify_kpop_data():
             '연관분석_태그': artist_tag
         })
 
-    return pd.DataFrame(data)
+        if len(data) >= 50:
+            break
+
+    df = pd.DataFrame(data)
+    # 인기도 순 정렬 후 순위 부여
+    df.insert(0, '순위', range(1, len(df) + 1))
+    return df
 
 # 데이터 수집 실행
 try:
