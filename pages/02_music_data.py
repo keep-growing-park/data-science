@@ -1,88 +1,107 @@
-import sys
-import subprocess
 import pandas as pd
+import spotipy
+from spotipy.oauth2 import SpotifyClientCredentials
 import streamlit as st
 
-# 차단 우회용 curl_cffi 및 bs4 자동 설치
+st.set_page_config(page_title="수업용 K-POP 데이터 수집기", layout="wide")
+st.title("🎵 K-POP 실시간 데이터 수집 및 정제")
+st.caption("Spotify Official API 기반 | 회귀·군집·연관 분석 실습용 데이터셋 제공")
+
+# 1시간 동안 API 호출 결과를 메모리에 저장하는 캐싱 함수
+@st.cache_data(ttl=3600)
+def fetch_spotify_kpop_data():
+    # Secrets(비밀금고)에서 인증키 로드
+    client_id = st.secrets["SPOTIPY_CLIENT_ID"]
+    client_secret = st.secrets["SPOTIPY_CLIENT_SECRET"]
+
+    auth_manager = SpotifyClientCredentials(client_id=client_id, client_secret=client_secret)
+    sp = spotipy.Spotify(auth_manager=auth_manager)
+
+    # Spotify 'Top 50 - 대한민국' 플레이리스트 ID
+    playlist_id = '37i9dQZEVXbJx5231P32uL'
+    results = sp.playlist_items(playlist_id, limit=50)
+
+    data = []
+    for idx, item in enumerate(results['items']):
+        track = item['track']
+        if not track:
+            continue
+        
+        # 1. 기본 실시간 음원 데이터
+        rank = idx + 1
+        title = track['name']
+        artist = track['artists'][0]['name']
+        album = track['album']['name']
+        popularity = track['popularity']              # 스포티파이 실제 인기도 (0~100)
+        duration_sec = round(track['duration_ms'] / 1000) # 재생시간(초)
+
+        # 2. 수업용 파생 변수 생성
+        # [회귀분석용] 연속형 변수
+        title_length = len(title)
+        artist_length = len(artist)
+        
+        # [군집분석용] 범주형 변수 (재생시간 기준 그룹화)
+        if duration_sec < 180:
+            duration_group = "Short"
+        elif duration_sec <= 210:
+            duration_group = "Medium"
+        else:
+            duration_group = "Long"
+
+        # [연관분석용] 트랜잭션 변수 (가수 이름 포함 형태)
+        artist_tag = f"Artist_{artist}"
+
+        data.append({
+            '순위': rank,
+            '곡명': title,
+            '가수명': artist,
+            '앨범명': album,
+            '인기도(Y)': popularity,
+            '재생시간_초': duration_sec,
+            '제목_글자수': title_length,
+            '가수명_글자수': artist_length,
+            '재생시간_그룹': duration_group,
+            '연관분석_태그': artist_tag
+        })
+
+    return pd.DataFrame(data)
+
+# 데이터 수집 실행
 try:
-    from curl_cffi import requests as curl_requests
-    from bs4 import BeautifulSoup
-except ModuleNotFoundError:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "curl_cffi", "beautifulsoup4"])
-    from curl_cffi import requests as curl_requests
-    from bs4 import BeautifulSoup
+    with st.spinner("Spotify API 연결 및 1시간 캐시 데이터 처리 중..."):
+        df = fetch_spotify_kpop_data()
 
-st.set_page_config(page_title="Melon TOP 100 데이터 수집기", layout="wide")
-st.title("🎵 멜론(Melon) 실시간 TOP 100 데이터 수집기")
-st.caption("클라우드 서버 차단을 우회하여 멜론 실시간 TOP 100 실제 데이터를 수집합니다.")
+    st.success("데이터 로드 완료 (최신 수집 후 1시간 동안 빠르게 캐시 데이터를 불러옵니다)")
 
-if "kpop_df" not in st.session_state:
-    st.session_state.kpop_df = None
+    # 탭 구성: 데이터 확인 및 분석 기법별 안내
+    tab1, tab2 = st.tabs(["📊 전체 데이터프레임", "📘 수업 활용 가이드"])
 
-if st.button("🚀 멜론 TOP 100 실제 데이터 수집 시작"):
-    with st.spinner("멜론 보안 서버 검증 통과 중..."):
-        try:
-            url = "https://www.melon.com/chart/index.htm"
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-                'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
-                'Referer': 'https://www.melon.com/'
-            }
-            
-            # Chrome 브라우저의 TLS 지문(Fingerprint)을 복제하여 해외 IP 차단 우회
-            response = curl_requests.get(url, headers=headers, impersonate="chrome120", timeout=15)
-            soup = BeautifulSoup(response.text, 'html.parser')
-            
-            lst50 = soup.select('tr.lst50')
-            lst100 = soup.select('tr.lst100')
-            tr_list = lst50 + lst100
-            
-            data = []
-            for tr in tr_list:
-                rank_elem = tr.select_one('span.rank')
-                if not rank_elem:
-                    continue
-                rank = int(rank_elem.text.strip())
-                
-                title_elem = tr.select_one('div.ellipsis.rank01 a')
-                title = title_elem.text.strip() if title_elem else ""
-                
-                artist_elem = tr.select_one('div.ellipsis.rank02 > a')
-                artist = artist_elem.text.strip() if artist_elem else ""
-                
-                album_elem = tr.select_one('div.ellipsis.rank03 a')
-                album = album_elem.text.strip() if album_elem else ""
-                
-                data.append({
-                    '순위': rank,
-                    '곡명': title,
-                    '가수명': artist,
-                    '앨범명': album,
-                    '추천점수': 101 - rank,
-                    '제목_글자수': len(title),
-                    '가수명_글자수': len(artist)
-                })
+    with tab1:
+        st.dataframe(df, use_container_width=True)
+        
+        # CSV 다운로드 버튼
+        csv_data = df.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
+        st.download_button(
+            label="📥 수업용 kpop_analysis_data.csv 다운로드",
+            data=csv_data,
+            file_name="kpop_analysis_data.csv",
+            mime="text/csv"
+        )
 
-            df = pd.DataFrame(data)
-            
-            if not df.empty and len(df) >= 50:
-                st.session_state.kpop_df = df
-                st.success(f"수집 성공! 멜론 TOP 100 실제 데이터({len(df)}개)를 정상 수집했습니다.")
-            else:
-                st.error("데이터 추출에 실패했습니다.")
+    with tab2:
+        st.markdown("""
+        **1. 회귀분석 (Regression)**
+        * 독립변수(X): `제목_글자수`, `가수명_글자수`, `재생시간_초`
+        * 종속변수(Y): `인기도(Y)` 또는 `순위`
+        
+        **2. 군집분석 (Clustering)**
+        * 수치형 K-Means: `재생시간_초`, `제목_글자수`, `인기도(Y)` 3차원 클러스터링
+        * 범주형 데이터: `재생시간_그룹`과 순위 구간별 집단 비교
+        
+        **3. 연관분석 (Association Rules)**
+        * `가수명`과 `연관분석_태그` 항목을 활용한 차트 상위권 동시 진입/인기 패턴 분석
+        """)
 
-        except Exception as e:
-            st.error(f"수집 오류 발생: {e}")
-
-# 결과 화면 출력 및 CSV 다운로드
-if st.session_state.kpop_df is not None and not st.session_state.kpop_df.empty:
-    st.dataframe(st.session_state.kpop_df, use_container_width=True)
-    
-    csv_data = st.session_state.kpop_df.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
-    st.download_button(
-        label="📥 수업용 멜론 melon_top100_data.csv 다운로드",
-        data=csv_data,
-        file_name="melon_top100_data.csv",
-        mime="text/csv"
-    )
+except Exception as e:
+    st.error(f"데이터 로드 실패: {e}")
+    st.info("Streamlit Cloud의 Settings > Secrets에 SPOTIPY_CLIENT_ID 및 SPOTIPY_CLIENT_SECRET 설정 여부를 확인하세요.")
