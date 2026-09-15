@@ -22,30 +22,41 @@ def fetch_spotify_kpop_data():
     )
     sp = spotipy.Spotify(auth_manager=auth_manager)
 
-    # Spotify API limit 규격(10개)에 맞춰 offset 페이징으로 100개 후보 수집 (0~90)
+    # 100개를 넘게 채우기 위해 다각도 K-POP 키워드 활용
+    search_queries = ['k-pop', 'kpop', 'korean pop', 'k-pop boy', 'k-pop girl']
     raw_items = []
-    for offset in range(0, 100, 10):  # 총 10회 요청
-        results = sp.search(q='k-pop', type='track', limit=10, offset=offset, market='KR')
-        tracks = results.get('tracks', {}).get('items', [])
-        raw_items.extend(tracks)
+
+    for query in search_queries:
+        for offset in range(0, 30, 10): # 각 키워드당 30개씩 후보 수집
+            try:
+                results = sp.search(q=query, type='track', limit=10, offset=offset, market='KR')
+                tracks = results.get('tracks', {}).get('items', [])
+                raw_items.extend(tracks)
+            except Exception:
+                continue
 
     # 인기도 순 정렬
     raw_items = sorted(raw_items, key=lambda x: x.get('popularity', 0), reverse=True)
 
     data = []
-    seen_tracks = set() # 중복 트랙 제거용
+    seen_tracks = set() # 중복 곡 제거용 (ID 및 제목+가수 조합)
 
     for track in raw_items:
         if not track:
             continue
         
         track_id = track.get('id')
-        if track_id in seen_tracks:
+        title = track.get('name', '').strip()
+        artist = track.get('artists', [{}])[0].get('name', '').strip()
+        
+        # ID 중복 또는 (곡명+가수) 중복 검사
+        track_key = (title.lower(), artist.lower())
+        if track_id in seen_tracks or track_key in seen_tracks:
             continue
+        
         seen_tracks.add(track_id)
+        seen_tracks.add(track_key)
 
-        title = track.get('name', '')
-        artist = track.get('artists', [{}])[0].get('name', '')
         album = track.get('album', {}).get('name', '')
         popularity = track.get('popularity', 0)                  # 스포티파이 실제 인기도 (0~100)
         duration_sec = round(track.get('duration_ms', 0) / 1000) # 재생시간(초)
@@ -75,21 +86,21 @@ def fetch_spotify_kpop_data():
             '연관분석_태그': artist_tag
         })
 
-        # Top 100 채우면 종료
+        # 정확히 100개가 채워지면 멈춤
         if len(data) >= 100:
             break
 
     df = pd.DataFrame(data)
-    # 순위 부여
+    # 인기도 순위 부여
     df.insert(0, '순위', range(1, len(df) + 1))
     return df
 
 # 데이터 수집 실행
 try:
-    with st.spinner("Spotify Official API 연결 및 100개 데이터 수집 중..."):
+    with st.spinner("Spotify Official API 연결 및 K-POP Top 100 수집 중..."):
         df = fetch_spotify_kpop_data()
 
-    st.success(f"데이터 로드 완료! 총 {len(df)}개의 K-POP 음원 데이터를 불러왔습니다.")
+    st.success(f"데이터 로드 완료! 총 {len(df)}개의 K-POP 음원 데이터를 정상적으로 불러왔습니다.")
 
     # 탭 구성: 데이터 확인 및 분석 가이드
     tab1, tab2 = st.tabs(["📊 전체 데이터프레임", "📘 수업 활용 가이드"])
@@ -114,7 +125,7 @@ try:
         
         **2. 군집분석 (Clustering)**
         * 수치형 K-Means: `재생시간_초`, `제목_글자수`, `인기도(Y)` 3차원 클러스터링
-        * 범주형 데이터: `재생시간_그룹`과 순위 구간별 집단 비교 (Top 20 vs 하위권)
+        * 범주형 데이터: `재생시간_그룹`과 순위 구간별 집단 비교
         
         **3. 연관분석 (Association Rules)**
         * `가수명`과 `연관분석_태그` 항목을 활용한 차트 상위권 동시 진입/인기 패턴 분석
